@@ -135,7 +135,7 @@ int call_consensus_from_plup(std::istream &cin, std::string out_file, uint8_t mi
   std::ofstream fout((out_file+".fa").c_str());
   std::ofstream tmp_qout((out_file+".qual.txt").c_str());
   char *o = new char[out_file.length() + 1];
-  vcf_writer *vw = new vcf_writer('b', out_file, "test", basename(o), ref_path); // add region
+  vcf_writer *vw = new vcf_writer('b', out_file, basename(o), ref_path);
   strcpy(o, out_file.c_str());
   fout << ">Consensus_" << basename(o) << "_threshold_" << threshold << "_quality_" << (uint16_t) min_qual  <<std::endl;
   delete [] o;
@@ -181,10 +181,13 @@ int call_consensus_from_plup(std::istream &cin, std::string out_file, uint8_t mi
       fout << std::string((pos - prev_pos) - 1, gap);
       tmp_qout << std::string((pos - prev_pos) - 1, '!'); // ! represents 0 quality score.
     }
+    if(vw->get_region().empty()) // Note: for now consensus working only for 1 region
+      vw->add_hdr_region(region);
     ret_t t;
     if(mdepth >= min_depth){
       ad = update_allele_depth(ref, bases, qualities, min_qual);
       t = get_consensus_allele(ad, min_qual, threshold, gap);
+      vw->write_record(pos, ad, ref, threshold);
       fout << t.nuc;
       tmp_qout << t.q;
     } else if(min_coverage_flag){
@@ -199,5 +202,6 @@ int call_consensus_from_plup(std::istream &cin, std::string out_file, uint8_t mi
   tmp_qout << "\n";
   tmp_qout.close();
   fout.close();
+  delete vw;
   return 0;
 }
