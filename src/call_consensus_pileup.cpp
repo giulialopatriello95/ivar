@@ -193,6 +193,8 @@ int call_consensus_from_plup(std::istream &cin, std::string out_file, uint8_t mi
       fout << t.nuc;
       tmp_qout << t.q;
     } else if(min_coverage_flag){
+      if(vw!=NULL)
+	vw->write_record_below_threshold(pos, region, ref);
       fout << gap;
       tmp_qout << '!';
     }
