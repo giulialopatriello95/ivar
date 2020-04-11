@@ -5,16 +5,15 @@ const float sig_level = 0.01;
 
 std::vector<allele>::iterator get_ref_allele(std::vector<allele> &ad, char ref){
   for(std::vector<allele>::iterator it = ad.begin(); it != ad.end(); ++it) {
-    if(it->nuc[0] == ref)
+    if(it->nuc[0] == ref && !is_indel(*it))
       return it;
   }
-  // print_allele_depths(ad);
   return ad.end();
 }
 
 double* get_frequency_depth(allele a, uint32_t pos_depth, uint32_t total_depth){ // pos_depth is ungapped depth after passing quality. total_depth is depth without quality filtering for indels.
   double *val = new double[2];
-  if(a.nuc[0] == '+' || a.nuc[0] == '-'){	// For insertions and deletions use depth discarding quality
+  if(is_indel(a)){	// For insertions and deletions use depth discarding quality
     val[0] = a.depth/(double)total_depth;
     val[1] = total_depth;
     return val;
@@ -92,6 +91,7 @@ int call_variants_from_plup(std::istream &cin, std::string out_file, uint8_t min
       continue;
     }
     ad = update_allele_depth(ref, bases, qualities, min_qual);
+    print_allele_depths(ad);
     if(ad.size() == 0){
       line_stream.clear();
       continue;
@@ -103,13 +103,14 @@ int call_variants_from_plup(std::istream &cin, std::string out_file, uint8_t min
       a.depth = 0;
       a.reverse = 0;
       a.mean_qual = 0;
+      a.deleted_bases = "";
       ad.push_back(a);
       ref_it = ad.end() - 1;
     }
     // Get ungapped coverage
     pdepth = 0;
     for(std::vector<allele>::iterator it = ad.begin(); it != ad.end(); ++it) {
-      if(it->nuc[0]=='*' || it->nuc[0] == '+' || it->nuc[0] == '-')
+      if(it->nuc[0]=='*')
 	continue;
       pdepth += it->depth;
     }
@@ -121,7 +122,11 @@ int call_variants_from_plup(std::istream &cin, std::string out_file, uint8_t min
 	continue;
       out_str << region << "\t";
       out_str << pos << "\t";
-      out_str << ref << "\t";
+      if(!(it->deleted_bases.empty())){
+	out_str << ref << it->deleted_bases << "\t";
+      } else {
+	out_str << ref << "\t";
+      }
       out_str << it->nuc << "\t";
       out_str << ref_it->depth << "\t";
       out_str << ref_it->reverse << "\t";
@@ -144,7 +149,7 @@ int call_variants_from_plup(std::istream &cin, std::string out_file, uint8_t min
       } else {
 	out_str << "FALSE" << "\t";
       }
-      if(it->nuc[0] != '+' && it->nuc[0] != '-'){
+      if(!is_indel(*it)){ // Ignore indels for aa translation
 	refantd.codon_aa_stream(region, out_str, fout, pos, it->nuc[0]);
       } else {
 	fout << out_str.str() << "NA\tNA\tNA\tNA\tNA" << std::endl;
