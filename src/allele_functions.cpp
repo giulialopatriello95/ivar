@@ -69,7 +69,6 @@ std::vector<allele> update_allele_depth(char ref,std::string bases, std::string 
   uint32_t i = 0, n =0, j = 0, q_ind = 0;
   bool beg, end;
   uint8_t q;
-  float num = 0, den = 0;
   std::string deleted_bases;
   std::string b;
   bool forward;
@@ -371,8 +370,6 @@ uint32_t get_total_depth(std::vector<allele> vec){
 }
 
 uint8_t get_longest_insertion(std::vector<allele> vec){
-  uint8_t ind = 0;
-  uint16_t len = 0;
   std::vector<allele>::iterator res;
   res = std::max_element(vec.begin(), vec.end(), [](allele &a, allele &b) {
       return a.nuc.length() < b.nuc.length();
