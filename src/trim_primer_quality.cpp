@@ -23,6 +23,7 @@ int32_t get_pos_on_query(uint32_t *cigar, uint32_t ncigar, int32_t pos, int32_t 
   return ql;
 }
 
+// Number of bases from 3' end for reverse reads
 int32_t get_pos_on_reference(uint32_t *cigar, uint32_t ncigar, uint32_t pos, uint32_t ref_start){
   int cig;
   int32_t n;
@@ -81,10 +82,10 @@ cigar_ quality_trim(bam1_t* r, uint8_t qual_threshold, uint8_t sliding_window){
   int del_len, cig, temp;
   uint32_t i = 0, j = 0;
   cigar_ t;
-  while(m >= qual_threshold && (i < r->core.l_qseq)){
+  while(m >= qual_threshold && (i < (uint32_t)r->core.l_qseq)){
     m = mean_quality(qual, i, i+sliding_window);
     i++;
-    if(i > r->core.l_qseq - sliding_window)
+    if(i > (uint32_t)r->core.l_qseq - sliding_window)
       sliding_window--;
   }
   // Reverse qual back.
@@ -92,7 +93,7 @@ cigar_ quality_trim(bam1_t* r, uint8_t qual_threshold, uint8_t sliding_window){
     reverse_qual(qual, r->core.l_qseq);
   }
   del_len = r->core.l_qseq - i;
-  start_pos = get_pos_on_reference(cigar, r->core.n_cigar, del_len, r->core.pos); // For reverse reads need to set core->pos
+  start_pos = get_pos_on_reference(cigar, r->core.n_cigar, del_len, r->core.pos); // For reverse reads need to set core->pos.
   if(bam_is_rev(r) && start_pos <= r->core.pos) {
     t.cigar = cigar;
     t.nlength = r->core.n_cigar;
@@ -146,6 +147,7 @@ void print_cigar(uint32_t *cigar, int nlength){
     std::cout << ((cigar[i]) & BAM_CIGAR_MASK);
     std::cout << "-" << ((cigar[i]) >> BAM_CIGAR_SHIFT) << " ";
   }
+  std::cout << std::endl;
 }
 
 cigar_ primer_trim(bam1_t *r, int32_t new_pos){
@@ -161,7 +163,7 @@ cigar_ primer_trim(bam1_t *r, int32_t new_pos){
   }
   int32_t n;
   while(i < r->core.n_cigar){
-    if (del_len == 0){
+    if (del_len == 0){ // del_len ==0 or consumes only reference
       ncigar[j] = cigar[i];
       i++;
       j++;
@@ -183,6 +185,9 @@ cigar_ primer_trim(bam1_t *r, int32_t new_pos){
 	ncigar[j] = bam_cigar_gen(n, cig);
 	j++;
       }
+    } else { // Only consumes reference: deletion or consumes nothing
+      ncigar[j] = cigar[i];
+      j++;
     }
     i++;
   }
@@ -191,12 +196,13 @@ cigar_ primer_trim(bam1_t *r, int32_t new_pos){
   }
   cigar_ t = {
     ncigar,
-    j
+    j,
+    0
   };
   return t;
 }
 
-void replace_cigar(bam1_t *b, int n, uint32_t *cigar){
+void replace_cigar(bam1_t *b, uint32_t n, uint32_t *cigar){
   if (n != b->core.n_cigar) {
     int o = b->core.l_qname + b->core.n_cigar * 4;
     if (b->l_data + (n - b->core.n_cigar) * 4 > b->m_data) {
@@ -211,25 +217,21 @@ void replace_cigar(bam1_t *b, int n, uint32_t *cigar){
   } else memcpy(b->data + b->core.l_qname, cigar, n * 4);
 }
 
-uint8_t get_overlapping_primer_indice(bam1_t* r, std::vector<primer> primers){
-  uint32_t query_pos, start_pos, *cigar = bam_get_cigar(r);
+void get_overlapping_primers(bam1_t* r, std::vector<primer> primers, std::vector<primer> &overlapped_primers){
+  overlapped_primers.clear();
+  uint32_t start_pos;
   if(bam_is_rev(r)){
     start_pos = bam_endpos(r)-1;
-    query_pos = start_pos + (bam_cigar2qlen(r->core.n_cigar, cigar) - get_pos_on_query(cigar, r->core.n_cigar, start_pos, r->core.pos)) - 1;
   } else {
     start_pos = r->core.pos;
-    query_pos = start_pos - get_pos_on_query(cigar, r->core.n_cigar, start_pos, r->core.pos);
   }
-  uint8_t i;
-  for(i = 0; i < primers.size();i++){
-    // query_pos >= primers[i].get_start() && query_pos <= primers[i].get_end()
-    if(start_pos >= primers[i].get_start() && start_pos <= primers[i].get_end()) // Change int to int32_t in primer_bed.cpp
-      return i;
+  for(std::vector<primer>::iterator it = primers.begin(); it != primers.end(); ++it) {
+    if(start_pos >= it->get_start() && start_pos <= it->get_end())
+      overlapped_primers.push_back(*it);
   }
-  return i;
 }
 
-cigar_ remove_trailing_query_ref_consumption(uint32_t* cigar, uint32_t n){
+cigar_ remove_trailing_query_ref_consumption(uint32_t* cigar, int32_t n){
   int i = 0, len = 0, cig, start_pos = 0;
   cigar_ t;
   while(i < n){
@@ -239,8 +241,7 @@ cigar_ remove_trailing_query_ref_consumption(uint32_t* cigar, uint32_t n){
       break;
     if(bam_cigar_type(cig) & 1){	// Consumes only query - insertion
       cigar[i] = bam_cigar_gen(len, BAM_CSOFT_CLIP);
-    }
-    if(bam_cigar_type(cig) & 2){	// Consumes only reference - deletion
+    } else {	// Consumes only reference - deletion or consumes nothing like padding
       for (int j = i; j < n-1; ++j){
 	cigar[j] = cigar[j+1];
       }
@@ -252,33 +253,32 @@ cigar_ remove_trailing_query_ref_consumption(uint32_t* cigar, uint32_t n){
   }
   reverse_cigar(cigar, n);
   i = 0, len = 0;
-  while(i < n){
+  while(i < n){			// TODO: This repeats loop from above. Restructure!
     cig = bam_cigar_op(cigar[i]);
     len = bam_cigar_oplen(cigar[i]);
     if((bam_cigar_type(cig) & 2) && (bam_cigar_type(cig) & 1))
       break;
     if(bam_cigar_type(cig) & 1){	// Consumes only query - insertion
       cigar[i] = bam_cigar_gen(len, BAM_CSOFT_CLIP);
-    }
-    if(bam_cigar_type(cig) & 2){	// Consumes only reference - deletion
+    } else {	// Consumes only reference - deletion or consumes nothing like padding
       for (int j = i; j < n-1; ++j){
 	cigar[j] = cigar[j+1];
       }
       n--;
       i--;
-      // start_pos += len;
+      start_pos += len;
     }
     i++;
   }
   reverse_cigar(cigar, n);
   t.cigar = cigar;
   t.nlength = n;
-  t.start_pos = start_pos;
+  t.start_pos = start_pos;	// Here start_pos is number of softclipped bases that don't consume query
   return t;
 }
 
 cigar_ condense_cigar(uint32_t* cigar, uint32_t n){
-  int i = 0, len = 0, cig, next_cig, start_pos = 0;
+  uint32_t i = 0, len = 0, cig, next_cig, start_pos = 0;
   cigar_ t = remove_trailing_query_ref_consumption(cigar, n);
   cigar = t.cigar;
   n = t.nlength;
@@ -289,7 +289,7 @@ cigar_ condense_cigar(uint32_t* cigar, uint32_t n){
     if(cig == next_cig){
       len = bam_cigar_oplen(cigar[i])+bam_cigar_oplen(cigar[i+1]);
       cigar[i] = bam_cigar_gen(len, bam_cigar_op(cigar[i]));
-      for(int j = i+1; j < n - 1; j++){
+      for(uint32_t j = i+1; j < n - 1; j++){
 	cigar[j] = cigar[j+1];
       }
       n--;
@@ -316,10 +316,13 @@ void add_pg_line_to_header(bam_hdr_t** hdr, char *cmd){
 }
 
 int trim_bam_qual_primer(std::string bam, std::string bed, std::string bam_out, std::string region_, uint8_t min_qual, uint8_t sliding_window, std::string cmd, bool write_no_primer_reads, int min_length = 30){
-  std::vector<primer> primers = populate_from_file(bed);
-  if(primers.size() == 0){
-    return 0;
+  std::vector<primer> primers;
+  if(!bed.empty()){
+    primers = populate_from_file(bed);
   }
+  // if(primers.size() == 0){
+  //   return 0;
+  // }
   if(bam.empty()){
     std::cout << "Bam file in empty." << std::endl;
     return -1;
@@ -395,29 +398,37 @@ int trim_bam_qual_primer(std::string bam, std::string bed, std::string bam_out, 
   bam1_t *aln = bam_init1();
   int ctr = 0;
   cigar_ t;
-  uint8_t p;
   uint32_t primer_trim_count = 0, no_primer_counter = 0, low_quality = 0;
   bool unmapped_flag = false;
   uint32_t unmapped_counter = 0;
+  primer cand_primer;
+  std::vector<primer> overlapping_primers;
+  std::vector<primer>::iterator cit;
   while(sam_itr_next(in, iter, aln) >= 0) {
     unmapped_flag = false;
     if((aln->core.flag&BAM_FUNMAP) == 0){
-      p = get_overlapping_primer_indice(aln, primers);
-      if(p < primers.size()){
+      get_overlapping_primers(aln, primers, overlapping_primers);
+      if(overlapping_primers.size() > 0){
 	primer_trim_count++;
 	if(bam_is_rev(aln)){
-	  t = primer_trim(aln, primers[p].get_start() - 1);
+	  cand_primer = get_min_start(overlapping_primers);
+	  t = primer_trim(aln, cand_primer.get_start() - 1);
 	} else {
-	  t = primer_trim(aln, primers[p].get_end() + 1);
-	  aln->core.pos = primers[p].get_end() + 1;
+	  cand_primer = get_max_end(overlapping_primers);
+	  t = primer_trim(aln, cand_primer.get_end() + 1);
+	  aln->core.pos = cand_primer.get_end() + 1;
 	}
 	replace_cigar(aln, t.nlength, t.cigar);
+	// Add count to primer
+	cit = std::find(primers.begin(), primers.end(), cand_primer);
+	if(cit != primers.end())
+	  cit->add_read_count(1);
       }
       t = quality_trim(aln, min_qual, sliding_window);	// Quality Trimming
       if(bam_is_rev(aln))
 	aln->core.pos = t.start_pos;
       t = condense_cigar(t.cigar, t.nlength);
-      aln->core.pos += t.start_pos;
+      // aln->core.pos += t.start_pos;
       replace_cigar(aln, t.nlength, t.cigar);
     } else {
       unmapped_flag = true;
@@ -425,8 +436,9 @@ int trim_bam_qual_primer(std::string bam, std::string bed, std::string bam_out, 
       continue;
     }
     if(bam_cigar2rlen(aln->core.n_cigar, bam_get_cigar(aln)) >= min_length){
-      if(p < primers.size()){	// Write to BAM only if primer found.
-	bam_aux_append(aln, "XA", 'C', 1, (uint8_t*) &p);
+      if(overlapping_primers.size() > 0){	// Write to BAM only if primer found.
+	int16_t cand_ind = cand_primer.get_indice();
+	bam_aux_append(aln, "XA", 's', sizeof(cand_ind), (uint8_t*) &cand_ind);
 	if(bam_write1(out, aln) < 0){
 	  std::cout << "Not able to write to BAM" << std::endl;
 	  hts_itr_destroy(iter);
@@ -438,7 +450,7 @@ int trim_bam_qual_primer(std::string bam, std::string bed, std::string bam_out, 
 	  return -1;
 	}
       } else {
-	if(write_no_primer_reads && !unmapped_flag){ // Write mapped reads to BAM if -e flag given
+	if((primers.size() == 0 || write_no_primer_reads) && !unmapped_flag){ // Write mapped reads to BAM if -e flag given
 	  if(bam_write1(out, aln) < 0){
 	    std::cout << "Not able to write to BAM" << std::endl;
 	    hts_itr_destroy(iter);
@@ -462,10 +474,16 @@ int trim_bam_qual_primer(std::string bam, std::string bed, std::string bam_out, 
   }
   std::cout << std::endl << "-------" << std::endl;
   std::cout << "Results: " << std::endl;
-  std::cout << "Trimmed primers from " << round_int(primer_trim_count, mapped) << "% (" << primer_trim_count <<  ") of reads." << std::endl;
+  std::cout << "Primer Name" << "\t" << "Read Count" << std::endl;
+  for(cit = primers.begin(); cit != primers.end(); ++cit) {
+    std::cout << cit->get_name() << "\t" << cit->get_read_count() << std::endl;
+  }
+  std::cout << std::endl << "Trimmed primers from " << round_int(primer_trim_count, mapped) << "% (" << primer_trim_count <<  ") of reads." << std::endl;
   std::cout << round_int( low_quality, mapped) << "% (" << low_quality << ") of reads were quality trimmed below the minimum length of " << min_length << " bp and were not writen to file." << std::endl;
   if(write_no_primer_reads){
     std::cout << round_int(no_primer_counter, mapped) << "% ("  << no_primer_counter << ") of reads started outside of primer regions. Since the -e flag was given, these reads were written to file." << std::endl;
+  } else if (primers.size() == 0) {
+    std::cout << round_int(no_primer_counter, mapped) << "% ("  << no_primer_counter << ") of reads started outside of primer regions. Since there were no primers found in BED file, these reads were written to file." << std::endl;
   } else {
     std::cout << round_int(no_primer_counter, mapped) << "% ("  << no_primer_counter << ") of reads that started outside of primer regions were not written to file." << std::endl;
   }

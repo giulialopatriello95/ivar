@@ -1,6 +1,5 @@
 #include "call_variants.h"
 
-const char gap='N';
 const float sig_level = 0.01;
 
 std::vector<allele>::iterator get_ref_allele(std::vector<allele> &ad, char ref){
@@ -26,7 +25,6 @@ double* get_frequency_depth(allele a, uint32_t pos_depth, uint32_t total_depth){
 int call_variants_from_plup(std::istream &cin, std::string out_file, uint8_t min_qual, double min_threshold, uint8_t min_depth, std::string ref_path, std::string gff_path){
   std::string line, cell, bases, qualities, region;
   ref_antd refantd(ref_path, gff_path);
-  char *ref_codon = new char[3], *alt_codon = new char[3];
   std::ostringstream out_str;
   std::ofstream fout((out_file+".tsv").c_str());
   fout << "REGION"
@@ -49,8 +47,8 @@ int call_variants_from_plup(std::istream &cin, std::string out_file, uint8_t min
     "\tALT_CODON"
     "\tALT_AA"
        << std::endl;
-  int ctr = 0, tmp;
-  int64_t start_pos = 0, pos = 0;
+  int ctr = 0;
+  int64_t pos = 0;
   uint32_t mdepth = 0, pdepth = 0; // mpdepth for mpileup depth and pdeth for ungapped depth at position
   double pval_left, pval_right, pval_twotailed, *freq_depth, err;
   std::stringstream line_stream;

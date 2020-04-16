@@ -8,37 +8,55 @@ int main() {
     "A",
     40,
     0,
-    30
+    30,
+    0,
+    0,
+    0
   };
   allele a2 = {
     "T",
     40,
     10,
-    30
+    30,
+    0,
+    0,
+    0
   };
   allele a3 = {
     "G",
     40,
     10,
-    10
+    10,
+    0,
+    0,
+    0
   };
   allele a4 = {
     "AT",
     30,
     10,
-    10
+    10,
+    0,
+    0,
+    0
   };
   allele a5 = {
     "AAG",
     30,
     10,
-    10
+    10,
+    0,
+    0,
+    0
   };
   allele a6 = {
     "AAC",
     40,
     4,
-    10
+    10,
+    0,
+    0,
+    0
   };
   allele a7 = {
     "AWG",
@@ -50,7 +68,10 @@ int main() {
     "CCT",
     40,
     2,
-    10
+    10,
+    0,
+    0,
+    0
   };
   int success = 0;
   std::vector<allele> ad = {a1,a2,a3,a4,a5};
@@ -74,6 +95,7 @@ int main() {
   
   ad.push_back(a7);
   s = get_consensus_allele(ad, 0, 0, 'N');
+  
   // A, T, G, AAC, AWG -> DWS
   success += (s.nuc.compare("DWS") == 0) ? 1: 0;
   // (40 * 30 + 40 * 30 + 40 * 10 + 40 * 10 + 40 * 10)/200
@@ -94,7 +116,10 @@ int main() {
     "A",
     50,
     5,
-    20
+    20,
+    0,
+    0,
+    0
   };
   ad.push_back(a9);
   s = get_consensus_allele(ad, 0, 0, 'N');
